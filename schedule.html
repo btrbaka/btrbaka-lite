@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>btrbaka: schedule</title>
+    <style>
+        .subject {
+            font-size: larger;
+            font-weight: bold;
+        }
+        .timerange {
+            font-weight: normal;
+            font-size: smaller;
+        }
+        td {
+            border: 2px solid;
+        }
+        th, td {
+            vertical-align: top;
+            padding: 0.5em;
+        }
+        table tr td:first-child {
+            text-align: center;
+            vertical-align: middle;
+        }
+        table {
+            border-collapse: collapse;
+        }
+        .back {
+            padding: 1em;
+            background-color: pink;
+            margin: 1em;
+            display: block;
+            color: black;
+            text-decoration: none;
+        }
+        .alert {
+            padding: 1em;
+            margin: 1em;
+            border-radius: 4px;
+        }
+        .alert.error {
+            background-color: #ffcdd2;
+            color: #c62828;
+        }
+        .canceled {
+            background-color: #ff174416;
+        }
+        .other {
+            background-color: #69f0ae16;
+        }
+        .holiday {
+            background-color: #4dd0e116;
+        }
+        .active {
+            box-shadow: inset 0 0 0 2px #e91e63;
+        }
+    </style>
+</head>
+<body onload="javascript:getschedule()">
+    <div id="alert"></div>
+    <div id="schedule"></div>
+    <a href="/" class="back">Go back</a>
+    <script>
+        function showAlert(message, type = "error") {
+            const alertDiv = document.getElementById("alert");
+            const alertElement = document.createElement("div");
+            alertElement.className = `alert ${type}`;
+            alertElement.innerHTML = message;
+            alertDiv.innerHTML = "";
+            alertDiv.appendChild(alertElement);
+        }
+
+        async function getschedule() {
+            const token = localStorage.getItem("token");
+            const url = localStorage.getItem("url");
+
+            if (!url || !token) {
+                showAlert("Not logged in! Go to the Account page to log in first.", "error");
+                return;
+            }
+
+            let now = new Date();
+            const today = now.toISOString().split("T")[0];
+            
+            const head = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": `Bearer ${token}`
+            };
+
+            try {
+                const response = await fetch(`${url}api/3/timetable/actual?date=${today}`, {
+                    method: "GET",
+                    headers: head
+                });
+
+                if (!response.ok) {
+                    showAlert("Failed to fetch schedule. Please try again.", "error");
+                    return;
+                }
+
+                const responseJson = await response.json();
+                const responseArray = Object.values(responseJson);
+
+                const scheduleDiv = document.getElementById("schedule");
+                scheduleDiv.innerHTML = "";
+
+                const scheduleTable = document.createElement("table");
+                scheduleDiv.appendChild(scheduleTable);
+
+                const scheduleTimeHeader = document.createElement("tr");
+                scheduleTable.appendChild(scheduleTimeHeader);
+
+                scheduleTimeHeader.appendChild(document.createElement("th"));
+                for (let k = 0; k < responseArray[0].length; k++) {
+                    const timeCell = document.createElement("th");
+                    timeCell.innerHTML =
+                        (k + 1) + ".<br><span class='timerange'>" +
+                        responseArray[0][k].BeginTime + " - " +
+                        responseArray[0][k].EndTime + "</span>";
+                    scheduleTimeHeader.appendChild(timeCell);
+                }
+
+                for (let i = 0; i < responseArray[1].length; i++) {
+                    const scheduleRow = document.createElement("tr");
+                    scheduleTable.appendChild(scheduleRow);
+
+                    const scheduleDay = document.createElement("td");
+                    const weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+                    scheduleDay.innerHTML = weekday[responseArray[1][i].DayOfWeek - 1];
+                    scheduleRow.appendChild(scheduleDay);
+
+                    if (responseArray[1][i].DayType === "Holiday" || responseArray[1][i].DayType === "Celebration") {
+                        for (let ii = 0; ii < responseArray[0].length; ii++) {
+                            const cell = document.createElement("td");
+                            cell.className = "holiday";
+                            cell.innerHTML = responseArray[1][i].DayType;
+                            scheduleRow.appendChild(cell);
+                        }
+                    } else {
+                        let cellIndex = 0;
+                        for (let j = 0; j < responseArray[1][i].Atoms.length; j++) {
+                            const atom = responseArray[1][i].Atoms[j];
+
+                            const currentHourId = atom.HourId;
+                            const expectedHourId = (j > 0) ? responseArray[1][i].Atoms[j - 1].HourId + 1 : currentHourId;
+                            
+                            if (j > 0 && currentHourId !== expectedHourId) {
+                                const gapCell = document.createElement("td");
+                                gapCell.innerHTML = "";
+                                scheduleRow.appendChild(gapCell);
+                            }
+
+                            const scheduleRowItem = document.createElement("td");
+                            let changeClass = "";
+
+                            let room;
+                            if (!atom.Change) {
+                                room = responseArray[6].find(z => z.Id === atom.RoomId)?.Abbrev || "N/A";
+                            } else {
+                                if (atom.RoomId) {
+                                    room = responseArray[6].find(z => z.Id === atom.RoomId)?.Abbrev || "";
+                                    room += "; " + atom.Change.Description;
+                                } else {
+                                    room = atom.Change.Description;
+                                }
+
+                                if (atom.Change.ChangeType !== "Canceled") {
+                                    changeClass = "other";
+                                } else {
+                                    changeClass = "canceled";
+                                }
+                            }
+
+                            let subject = "N/A";
+                            if (atom.SubjectId !== null) {
+                                const subjectObj = responseArray[4].find(x => x.Id === atom.SubjectId);
+                                subject = subjectObj ? subjectObj.Abbrev : "N/A";
+                            }
+
+                            let teacher = "N/A";
+                            if (atom.TeacherId !== null) {
+                                const teacherObj = responseArray[5].find(y => y.Id === atom.TeacherId);
+                                teacher = teacherObj ? teacherObj.Abbrev : "N/A";
+                            }
+
+                            const currentTime = now.toISOString().split("T")[0];
+                            const dateSchedule = responseArray[1][i].Date.split("T")[0];
+                            
+                            if (currentTime === dateSchedule) {
+                                const hours = now.getHours();
+                                const minutes = String(now.getMinutes()).padStart(2, "0");
+                                const currentTimeStr = `${hours}:${minutes}`;
+
+                                const startTime = responseArray[0].find(z => z.Id === atom.HourId).BeginTime;
+                                const endTime = responseArray[0].find(z => z.Id === atom.HourId).EndTime;
+
+                                const [currentHours, currentMinutes] = currentTimeStr.split(":").map(Number);
+                                const currentTimeInMinutes = currentHours * 60 + currentMinutes;
+
+                                const [startHours, startMinutes] = startTime.split(":").map(Number);
+                                const startTimeInMinutes = startHours * 60 + startMinutes;
+
+                                const [endHours, endMinutes] = endTime.split(":").map(Number);
+                                const endTimeInMinutes = endHours * 60 + endMinutes;
+
+                                if (currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes <= endTimeInMinutes) {
+                                    changeClass += (changeClass ? " " : "") + "active";
+                                }
+                            }
+
+                            scheduleRowItem.className = changeClass;
+                            scheduleRowItem.innerHTML =
+                                "<span class='subject'>" + subject + "</span><br>" +
+                                teacher + "<br>" +
+                                room;
+                            scheduleRow.appendChild(scheduleRowItem);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("Error fetching schedule:", error);
+                showAlert("An error occurred while fetching the schedule.", "error");
+            }
+        }
+    </script>
+</body>
+</html>
