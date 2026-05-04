@@ -63,166 +63,199 @@
     <div id="schedule"></div>
     <a href="/" class="back">Go back</a>
     <script>
-        function showAlert(message, type = "error") {
-            const alertDiv = document.getElementById("alert");
-            const alertElement = document.createElement("div");
-            alertElement.className = `alert ${type}`;
-            alertElement.innerHTML = message;
+        function showAlert(message, type) {
+            if (type === undefined) {
+                type = "error";
+            }
+            var alertDiv = document.getElementById("alert");
             alertDiv.innerHTML = "";
+            var alertElement = document.createElement("div");
+            alertElement.className = "alert " + type;
+            alertElement.innerHTML = message;
             alertDiv.appendChild(alertElement);
         }
 
-        async function getschedule() {
-            const token = localStorage.getItem("token");
-            const url = localStorage.getItem("url");
+        function parseTime(timeText) {
+            var parts = timeText.split(":");
+            return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+        }
+
+        function findById(array, id) {
+            if (!array) {
+                return null;
+            }
+            for (var i = 0; i < array.length; i++) {
+                if (array[i].Id === id) {
+                    return array[i];
+                }
+            }
+            return null;
+        }
+
+        function findAbbrev(array, id) {
+            var item = findById(array, id);
+            return item ? item.Abbrev : "N/A";
+        }
+
+        function getschedule() {
+            var token = localStorage.getItem("token");
+            var url = localStorage.getItem("url");
 
             if (!url || !token) {
                 showAlert("Not logged in! Go to the Account page to log in first.", "error");
                 return;
             }
 
-            let now = new Date();
-            const today = now.toISOString().split("T")[0];
-            
-            const head = {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Authorization": `Bearer ${token}`
-            };
+            var now = new Date();
+            var today = now.toISOString().split("T")[0];
 
-            try {
-                const response = await fetch(`${url}api/3/timetable/actual?date=${today}`, {
-                    method: "GET",
-                    headers: head
-                });
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", url + "api/3/timetable/actual?date=" + today, true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            xhr.setRequestHeader("Authorization", "Bearer " + token);
 
-                if (!response.ok) {
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== 4) {
+                    return;
+                }
+
+                if (xhr.status < 200 || xhr.status >= 300) {
                     showAlert("Failed to fetch schedule. Please try again.", "error");
                     return;
                 }
 
-                const responseJson = await response.json();
-                const responseArray = Object.values(responseJson);
-
-                const scheduleDiv = document.getElementById("schedule");
-                scheduleDiv.innerHTML = "";
-
-                const scheduleTable = document.createElement("table");
-                scheduleDiv.appendChild(scheduleTable);
-
-                const scheduleTimeHeader = document.createElement("tr");
-                scheduleTable.appendChild(scheduleTimeHeader);
-
-                scheduleTimeHeader.appendChild(document.createElement("th"));
-                for (let k = 0; k < responseArray[0].length; k++) {
-                    const timeCell = document.createElement("th");
-                    timeCell.innerHTML =
-                        (k + 1) + ".<br><span class='timerange'>" +
-                        responseArray[0][k].BeginTime + " - " +
-                        responseArray[0][k].EndTime + "</span>";
-                    scheduleTimeHeader.appendChild(timeCell);
-                }
-
-                for (let i = 0; i < responseArray[1].length; i++) {
-                    const scheduleRow = document.createElement("tr");
-                    scheduleTable.appendChild(scheduleRow);
-
-                    const scheduleDay = document.createElement("td");
-                    const weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-                    scheduleDay.innerHTML = weekday[responseArray[1][i].DayOfWeek - 1];
-                    scheduleRow.appendChild(scheduleDay);
-
-                    if (responseArray[1][i].DayType === "Holiday" || responseArray[1][i].DayType === "Celebration") {
-                        for (let ii = 0; ii < responseArray[0].length; ii++) {
-                            const cell = document.createElement("td");
-                            cell.className = "holiday";
-                            cell.innerHTML = responseArray[1][i].DayType;
-                            scheduleRow.appendChild(cell);
-                        }
-                    } else {
-                        let cellIndex = 0;
-                        for (let j = 0; j < responseArray[1][i].Atoms.length; j++) {
-                            const atom = responseArray[1][i].Atoms[j];
-
-                            const currentHourId = atom.HourId;
-                            const expectedHourId = (j > 0) ? responseArray[1][i].Atoms[j - 1].HourId + 1 : currentHourId;
-                            
-                            if (j > 0 && currentHourId !== expectedHourId) {
-                                const gapCell = document.createElement("td");
-                                gapCell.innerHTML = "";
-                                scheduleRow.appendChild(gapCell);
-                            }
-
-                            const scheduleRowItem = document.createElement("td");
-                            let changeClass = "";
-
-                            let room;
-                            if (!atom.Change) {
-                                room = responseArray[6].find(z => z.Id === atom.RoomId)?.Abbrev || "N/A";
-                            } else {
-                                if (atom.RoomId) {
-                                    room = responseArray[6].find(z => z.Id === atom.RoomId)?.Abbrev || "";
-                                    room += "; " + atom.Change.Description;
-                                } else {
-                                    room = atom.Change.Description;
-                                }
-
-                                if (atom.Change.ChangeType !== "Canceled") {
-                                    changeClass = "other";
-                                } else {
-                                    changeClass = "canceled";
-                                }
-                            }
-
-                            let subject = "N/A";
-                            if (atom.SubjectId !== null) {
-                                const subjectObj = responseArray[4].find(x => x.Id === atom.SubjectId);
-                                subject = subjectObj ? subjectObj.Abbrev : "N/A";
-                            }
-
-                            let teacher = "N/A";
-                            if (atom.TeacherId !== null) {
-                                const teacherObj = responseArray[5].find(y => y.Id === atom.TeacherId);
-                                teacher = teacherObj ? teacherObj.Abbrev : "N/A";
-                            }
-
-                            const currentTime = now.toISOString().split("T")[0];
-                            const dateSchedule = responseArray[1][i].Date.split("T")[0];
-                            
-                            if (currentTime === dateSchedule) {
-                                const hours = now.getHours();
-                                const minutes = String(now.getMinutes()).padStart(2, "0");
-                                const currentTimeStr = `${hours}:${minutes}`;
-
-                                const startTime = responseArray[0].find(z => z.Id === atom.HourId).BeginTime;
-                                const endTime = responseArray[0].find(z => z.Id === atom.HourId).EndTime;
-
-                                const [currentHours, currentMinutes] = currentTimeStr.split(":").map(Number);
-                                const currentTimeInMinutes = currentHours * 60 + currentMinutes;
-
-                                const [startHours, startMinutes] = startTime.split(":").map(Number);
-                                const startTimeInMinutes = startHours * 60 + startMinutes;
-
-                                const [endHours, endMinutes] = endTime.split(":").map(Number);
-                                const endTimeInMinutes = endHours * 60 + endMinutes;
-
-                                if (currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes <= endTimeInMinutes) {
-                                    changeClass += (changeClass ? " " : "") + "active";
-                                }
-                            }
-
-                            scheduleRowItem.className = changeClass;
-                            scheduleRowItem.innerHTML =
-                                "<span class='subject'>" + subject + "</span><br>" +
-                                teacher + "<br>" +
-                                room;
-                            scheduleRow.appendChild(scheduleRowItem);
+                try {
+                    var responseJson = JSON.parse(xhr.responseText);
+                    var responseArray = [];
+                    for (var key in responseJson) {
+                        if (Object.prototype.hasOwnProperty.call(responseJson, key)) {
+                            responseArray.push(responseJson[key]);
                         }
                     }
+
+                    var scheduleDiv = document.getElementById("schedule");
+                    scheduleDiv.innerHTML = "";
+                    var scheduleTable = document.createElement("table");
+                    scheduleDiv.appendChild(scheduleTable);
+
+                    var scheduleTimeHeader = document.createElement("tr");
+                    scheduleTable.appendChild(scheduleTimeHeader);
+                    scheduleTimeHeader.appendChild(document.createElement("th"));
+
+                    var periods = responseArray[0] || [];
+                    for (var k = 0; k < periods.length; k++) {
+                        var timeCell = document.createElement("th");
+                        timeCell.innerHTML = (k + 1) + ".<br><span class='timerange'>" + periods[k].BeginTime + " - " + periods[k].EndTime + "</span>";
+                        scheduleTimeHeader.appendChild(timeCell);
+                    }
+
+                    var weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+                    var dayRows = responseArray[1] || [];
+
+                    for (var i = 0; i < dayRows.length; i++) {
+                        var scheduleRow = document.createElement("tr");
+                        scheduleTable.appendChild(scheduleRow);
+
+                        var scheduleDay = document.createElement("td");
+                        scheduleDay.innerHTML = weekdays[dayRows[i].DayOfWeek - 1] || "";
+                        scheduleRow.appendChild(scheduleDay);
+
+                        if (dayRows[i].DayType === "Holiday" || dayRows[i].DayType === "Celebration") {
+                            for (var ii = 0; ii < periods.length; ii++) {
+                                var cell = document.createElement("td");
+                                cell.className = "holiday";
+                                cell.innerHTML = dayRows[i].DayType;
+                                scheduleRow.appendChild(cell);
+                            }
+                        } else {
+                            var atoms = dayRows[i].Atoms || [];
+                            for (var j = 0; j < atoms.length; j++) {
+                                var atom = atoms[j];
+                                var currentHourId = atom.HourId;
+                                var expectedHourId = (j > 0) ? atoms[j - 1].HourId + 1 : currentHourId;
+
+                                if (j > 0 && currentHourId !== expectedHourId) {
+                                    var gapCell = document.createElement("td");
+                                    gapCell.innerHTML = "";
+                                    scheduleRow.appendChild(gapCell);
+                                }
+
+                                var scheduleRowItem = document.createElement("td");
+                                var changeClass = "";
+
+                                var room = "N/A";
+                                if (!atom.Change) {
+                                    room = findAbbrev(responseArray[6], atom.RoomId);
+                                } else {
+                                    if (atom.RoomId) {
+                                        room = findAbbrev(responseArray[6], atom.RoomId);
+                                        if (room !== "N/A") {
+                                            room += "; ";
+                                        }
+                                        room += atom.Change.Description;
+                                    } else {
+                                        room = atom.Change.Description;
+                                    }
+                                    changeClass = atom.Change.ChangeType !== "Canceled" ? "other" : "canceled";
+                                }
+
+                                var subject = "N/A";
+                                if (atom.SubjectId !== null) {
+                                    var subjectObj = findById(responseArray[4], atom.SubjectId);
+                                    if (subjectObj) {
+                                        subject = subjectObj.Abbrev;
+                                    }
+                                }
+
+                                var teacher = "N/A";
+                                if (atom.TeacherId !== null) {
+                                    var teacherObj = findById(responseArray[5], atom.TeacherId);
+                                    if (teacherObj) {
+                                        teacher = teacherObj.Abbrev;
+                                    }
+                                }
+
+                                var currentTime = now.toISOString().split("T")[0];
+                                var dateSchedule = (dayRows[i].Date || "").split("T")[0];
+
+                                if (currentTime === dateSchedule) {
+                                    var hours = now.getHours();
+                                    var minutes = now.getMinutes();
+                                    if (minutes < 10) {
+                                        minutes = "0" + minutes;
+                                    }
+                                    var currentTimeStr = hours + ":" + minutes;
+                                    var hourInfo = findById(responseArray[0], atom.HourId);
+
+                                    if (hourInfo) {
+                                        var startTime = hourInfo.BeginTime;
+                                        var endTime = hourInfo.EndTime;
+                                        var currentTimeInMinutes = parseTime(currentTimeStr);
+                                        var startTimeInMinutes = parseTime(startTime);
+                                        var endTimeInMinutes = parseTime(endTime);
+
+                                        if (currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes <= endTimeInMinutes) {
+                                            if (changeClass) {
+                                                changeClass += " active";
+                                            } else {
+                                                changeClass = "active";
+                                            }
+                                        }
+                                    }
+                                }
+
+                                scheduleRowItem.className = changeClass;
+                                scheduleRowItem.innerHTML = "<span class='subject'>" + subject + "</span><br>" + teacher + "<br>" + room;
+                                scheduleRow.appendChild(scheduleRowItem);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    showAlert("An error occurred while fetching the schedule.", "error");
                 }
-            } catch (error) {
-                console.error("Error fetching schedule:", error);
-                showAlert("An error occurred while fetching the schedule.", "error");
-            }
+            };
+
+            xhr.send();
         }
     </script>
 </body>
